@@ -30,6 +30,7 @@ export default defineConfig({
             { label: 'Migrations with Redux Remigrate', slug: 'usage/migrations' },
             { label: 'Custom Storage Driver', slug: 'usage/custom-storage-driver' },
             { label: 'Using in Reducers', slug: 'usage/using-in-reducers' },
+            { label: 'Lazy-loaded Reducers', slug: 'usage/lazy-loaded-reducers' },
             { label: 'Rehydration Gate', slug: 'usage/rehydration-gate' },
             { label: 'Error Handling', slug: 'usage/error-handling' },
             {
