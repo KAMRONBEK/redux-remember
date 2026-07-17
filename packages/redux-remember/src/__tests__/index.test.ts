@@ -6,6 +6,7 @@ import type { Options } from '../types.ts';
 
 describe('index.ts', () => {
   const mockRehydrate = {
+    rehydrate: vi.fn(),
     rehydrateReducer: vi.fn(() => 'REHYDRATE_REDUCER')
   };
 
@@ -14,6 +15,7 @@ describe('index.ts', () => {
   let index: typeof indexModule;
 
   beforeEach(async () => {
+    mockRehydrate.rehydrate = vi.fn();
     mockRehydrate.rehydrateReducer = vi.fn(() => 'REHYDRATE_REDUCER');
     mockInit = vi.fn(() => {});
     mockCombineReducers = vi.fn(() => {});
@@ -127,7 +129,7 @@ describe('index.ts', () => {
     };
 
     let mockCreateStore: StoreCreator;
-    const mockStore = 'my-mocked-store';
+    const mockStore: any = { name: 'my-mocked-store' };
     const rememberedKeys = ['zz', 'bb', 'kk'];
     const rootReducer = (state = {}) => state;
     let rootReducerWrapper: Reducer;
@@ -257,6 +259,60 @@ describe('index.ts', () => {
 
       vi.clearAllTimers();
       vi.useRealTimers();
+    });
+
+    it('exposes store.rehydrate() and rehydrates the requested keys', async () => {
+      const storeMaker: StoreCreator = index.rememberEnhancer(
+        mockDriver, [...rememberedKeys]
+      )((() => mockStore) as StoreCreator);
+
+      const store: any = storeMaker(rootReducer, initialState, enhancer);
+
+      expect(typeof store.rehydrate).toBe('function');
+
+      await store.rehydrate(['newKey']);
+
+      expect(mockRehydrate.rehydrate).toHaveBeenCalledWith(
+        mockStore,
+        ['newKey'],
+        expect.objectContaining({
+          driver: mockDriver,
+          prefix: '@@remember-'
+        })
+      );
+    });
+
+    it('store.rehydrate() starts remembering newly requested keys', async () => {
+      const keys = ['aa', 'bb'];
+
+      const storeMaker: StoreCreator = index.rememberEnhancer(
+        mockDriver, keys
+      )((() => mockStore) as StoreCreator);
+
+      const store: any = storeMaker(rootReducer, initialState, enhancer);
+
+      await store.rehydrate(['aa', 'cc']);
+
+      // already-remembered keys are not duplicated, new ones are appended
+      expect(keys).toEqual(['aa', 'bb', 'cc']);
+    });
+
+    it('store.rehydrate() with no arguments rehydrates every remembered key', async () => {
+      const keys = ['aa', 'bb'];
+
+      const storeMaker: StoreCreator = index.rememberEnhancer(
+        mockDriver, keys
+      )((() => mockStore) as StoreCreator);
+
+      const store: any = storeMaker(rootReducer, initialState, enhancer);
+
+      await store.rehydrate();
+
+      expect(mockRehydrate.rehydrate).toHaveBeenCalledWith(
+        mockStore,
+        keys,
+        expect.objectContaining({ driver: mockDriver })
+      );
     });
   });
 });

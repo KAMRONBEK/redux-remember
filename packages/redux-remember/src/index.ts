@@ -1,6 +1,7 @@
 import init from './init.ts';
+import { rehydrate } from './rehydrate.ts';
 import { REMEMBER_REHYDRATED, REMEMBER_PERSISTED } from './action-types.ts';
-import type { Driver, Options } from './types.ts';
+import type { Driver, Options, RememberEnhancerStoreExt } from './types.ts';
 import type {
   Action,
   StoreEnhancer,
@@ -60,7 +61,7 @@ const rememberReducer = <S = any, A extends Action = UnknownAction, PreloadedSta
   };
 };
 
-const rememberEnhancer = <Ext extends {} = {}, StateExt extends {} = {}>(
+const rememberEnhancer = <Ext extends {} = RememberEnhancerStoreExt, StateExt extends {} = {}>(
   driver: Driver,
   rememberedKeys: string[],
   {
@@ -113,12 +114,30 @@ const rememberEnhancer = <Ext extends {} = {}, StateExt extends {} = {}>(
       enhancer
     );
 
+    // Rehydrate (and start remembering) additional keys on demand. This is what
+    // makes lazy-loaded / injected reducers work: inject the reducer, then call
+    // store.rehydrate([key]) to load its persisted value and keep persisting it.
+    // Called with no arguments it re-reads every currently remembered key.
+    const rehydrateStore = async (keys: string[] = rememberedKeys): Promise<void> => {
+      keys.forEach((key) => {
+        if (!rememberedKeys.includes(key)) {
+          rememberedKeys.push(key);
+        }
+      });
+
+      await rehydrate(
+        store,
+        keys,
+        { prefix, driver, unserialize, migrate, persistWholeStore, errorHandler }
+      );
+    };
+
     if (!initActionType) {
       isInitialized = true;
       void initialize(store);
     }
 
-    return store;
+    return Object.assign(store, { rehydrate: rehydrateStore });
   };
 
   return storeCreator;

@@ -2,7 +2,7 @@
 title: Lazy-loaded (injected) reducers
 ---
 
-Redux Remember doesn't add lazy-loaded / injected reducers as a first-class feature. Injecting a reducer that is *also* persisted introduces an ordering (race) condition between when the reducer becomes available and when Redux Remember reads storage, so it's left as an opt-in pattern rather than something built in. This page covers the two cases that come up and how each behaves.
+Redux Remember supports lazy-loaded / injected reducers — reducers you add to the store after it's been created, for example a code-split slice that loads when the user navigates to a route. There are two cases, depending on whether the injected slice is persisted.
 
 ## Non-persisted injected slices
 
@@ -26,13 +26,13 @@ const store = configureStore({
 rootReducer.inject(lazySlice);
 ```
 
-Redux Remember only ever touches the keys listed in `rememberedKeys`, so an injected slice that isn't listed is invisible to it — no rehydrate, no persist, no race.
+Redux Remember only ever touches the keys listed in `rememberedKeys`, so an injected slice that isn't listed is invisible to it — no rehydrate, no persist.
 
 ## Persisted injected slices
 
-If you want an injected slice to be persisted, ordering matters. Redux Remember reads storage and dispatches [`REMEMBER_REHYDRATED`](../api/actions.md#remember_rehydrated) once, when it initializes. A reducer injected *after* that point has already missed its rehydration, so its stored value is dropped and it starts from its initial state instead.
+For a slice you *do* want persisted, timing matters. Redux Remember reads storage and dispatches [`REMEMBER_REHYDRATED`](../api/actions.md#remember_rehydrated) once, when it initializes. A reducer injected after that point has already missed its rehydration, so its stored value would be dropped and it would start from its initial state.
 
-The `initActionType` option lines the two up. When it's set, Redux Remember holds off on initializing (reading storage and starting to persist) until you dispatch that action. So inject the reducer first, then dispatch the init action:
+Call [`store.rehydrate(keys)`](../api/remember-enhancer.md) after injecting the reducer. It reads those keys from storage, rehydrates them into the store, and adds them to the remembered set so they're persisted from then on:
 
 ```ts
 const rootReducer = combineSlices(baseSlice);
@@ -40,23 +40,19 @@ const rootReducer = combineSlices(baseSlice);
 const store = configureStore({
   reducer: rememberReducer(rootReducer),
   enhancers: (getDefaultEnhancers) => getDefaultEnhancers().concat(
-    rememberEnhancer(window.localStorage, ['base', 'lazyPersisted'], {
-      initActionType: 'REMEMBER_INIT',
-    })
+    rememberEnhancer(window.localStorage, ['base'])
   ),
 });
 
-// 1. inject the reducer so it exists in the state tree...
-rootReducer.inject(lazyPersistedSlice);
-
-// 2. ...then let Redux Remember read storage, with the slice already present
-store.dispatch({ type: 'REMEMBER_INIT' });
+// when the lazy slice loads:
+rootReducer.inject(lazyPersistedSlice);   // 1. add the reducer to the tree
+await store.rehydrate(['lazyPersisted']); // 2. load its persisted state
 ```
 
-Storage is now read after `lazyPersisted` is in the tree, so it rehydrates like any statically-defined key. Without `initActionType`, Redux Remember auto-initializes as soon as the store is created — before a later `inject()` runs — which is exactly the race that drops the stored value.
+After this, `lazyPersisted` holds its stored value and is persisted on every change like any statically-defined key. Called with no arguments, `store.rehydrate()` re-reads every currently remembered key.
 
 ## See Also
 
-- [`rememberEnhancer`](../api/remember-enhancer.md) — the `initActionType` and `rememberedKeys` options
+- [`rememberEnhancer`](../api/remember-enhancer.md) — the `rememberedKeys` option and the `store.rehydrate` method
 - [`REMEMBER_REHYDRATED`](../api/actions.md#remember_rehydrated)
 - [Using in Reducers](./using-in-reducers.md)
