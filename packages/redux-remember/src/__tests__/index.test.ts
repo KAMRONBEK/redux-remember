@@ -6,7 +6,7 @@ import type { Options } from '../types.ts';
 
 describe('index.ts', () => {
   const mockRehydrate = {
-    rehydrate: vi.fn(),
+    loadKeys: vi.fn(),
     rehydrateReducer: vi.fn(() => 'REHYDRATE_REDUCER')
   };
 
@@ -15,7 +15,7 @@ describe('index.ts', () => {
   let index: typeof indexModule;
 
   beforeEach(async () => {
-    mockRehydrate.rehydrate = vi.fn();
+    mockRehydrate.loadKeys = vi.fn(async () => ({}));
     mockRehydrate.rehydrateReducer = vi.fn(() => 'REHYDRATE_REDUCER');
     mockInit = vi.fn(() => {});
     mockCombineReducers = vi.fn(() => {});
@@ -129,7 +129,7 @@ describe('index.ts', () => {
     };
 
     let mockCreateStore: StoreCreator;
-    const mockStore: any = { name: 'my-mocked-store' };
+    let mockStore: any;
     const rememberedKeys = ['zz', 'bb', 'kk'];
     const rootReducer = (state = {}) => state;
     let rootReducerWrapper: Reducer;
@@ -137,6 +137,12 @@ describe('index.ts', () => {
     const enhancer: any = 'dummy enhancer';
 
     beforeEach(() => {
+      mockStore = {
+        name: 'my-mocked-store',
+        getState: vi.fn(() => ({})),
+        dispatch: vi.fn()
+      };
+
       mockCreateStore = vi.fn((wrapper) => {
         rootReducerWrapper = wrapper;
         return mockStore;
@@ -261,19 +267,18 @@ describe('index.ts', () => {
       vi.useRealTimers();
     });
 
-    it('exposes store.rehydrate() and rehydrates the requested keys', async () => {
+    it('exposes store.unsafeRehydrate() and reads the requested keys', async () => {
       const storeMaker: StoreCreator = index.rememberEnhancer(
         mockDriver, [...rememberedKeys]
       )((() => mockStore) as StoreCreator);
 
       const store: any = storeMaker(rootReducer, initialState, enhancer);
 
-      expect(typeof store.rehydrate).toBe('function');
+      expect(typeof store.unsafeRehydrate).toBe('function');
 
-      await store.rehydrate(['newKey']);
+      await store.unsafeRehydrate(['newKey']);
 
-      expect(mockRehydrate.rehydrate).toHaveBeenCalledWith(
-        mockStore,
+      expect(mockRehydrate.loadKeys).toHaveBeenCalledWith(
         ['newKey'],
         expect.objectContaining({
           driver: mockDriver,
@@ -282,35 +287,123 @@ describe('index.ts', () => {
       );
     });
 
-    it('store.rehydrate() starts remembering newly requested keys', async () => {
-      const keys = ['aa', 'bb'];
-
+    it('store.unsafeRehydrate() does not apply migrate()', async () => {
       const storeMaker: StoreCreator = index.rememberEnhancer(
-        mockDriver, keys
+        mockDriver, [...rememberedKeys], { migrate: (state) => state }
       )((() => mockStore) as StoreCreator);
 
       const store: any = storeMaker(rootReducer, initialState, enhancer);
 
-      await store.rehydrate(['aa', 'cc']);
+      await store.unsafeRehydrate(['newKey']);
 
-      // already-remembered keys are not duplicated, new ones are appended
-      expect(keys).toEqual(['aa', 'bb', 'cc']);
+      // migrate() is a whole-state, run-once function - re-running it over
+      // already-migrated state would be unsound
+      const [, loadOptions] = mockRehydrate.loadKeys.mock.calls[0];
+      expect(loadOptions).not.toHaveProperty('migrate');
     });
 
-    it('store.rehydrate() with no arguments rehydrates every remembered key', async () => {
-      const keys = ['aa', 'bb'];
+    it('store.unsafeRehydrate() remembers new keys without mutating the caller array', async () => {
+      const callerKeys = ['aa', 'bb'];
 
       const storeMaker: StoreCreator = index.rememberEnhancer(
-        mockDriver, keys
+        mockDriver, callerKeys
       )((() => mockStore) as StoreCreator);
 
       const store: any = storeMaker(rootReducer, initialState, enhancer);
 
-      await store.rehydrate();
+      await store.unsafeRehydrate(['aa', 'cc']);
 
-      expect(mockRehydrate.rehydrate).toHaveBeenCalledWith(
-        mockStore,
-        keys,
+      // the array the caller passed in is left alone
+      expect(callerKeys).toEqual(['aa', 'bb']);
+
+      // the store's own copy - shared with init() - gained 'cc' and did not
+      // duplicate 'aa', so 'cc' is persisted from now on
+      const [, storeKeys] = mockInit.mock.calls[0];
+      expect(storeKeys).toEqual(['aa', 'bb', 'cc']);
+    });
+
+    it('store.unsafeRehydrate() with no arguments re-reads every remembered key', async () => {
+      const storeMaker: StoreCreator = index.rememberEnhancer(
+        mockDriver, ['aa', 'bb']
+      )((() => mockStore) as StoreCreator);
+
+      const store: any = storeMaker(rootReducer, initialState, enhancer);
+
+      await store.unsafeRehydrate();
+
+      expect(mockRehydrate.loadKeys).toHaveBeenCalledWith(
+        ['aa', 'bb'],
+        expect.objectContaining({ driver: mockDriver })
+      );
+    });
+
+    it('store.unsafeRehydrate() dispatches the state as of after the read', async () => {
+      mockStore.getState = vi.fn(() => ({ counter: 1 }));
+
+      // state moves on while storage is being read
+      mockRehydrate.loadKeys = vi.fn(async () => {
+        mockStore.getState = vi.fn(() => ({ counter: 2 }));
+        return { lazy: 'loaded' };
+      });
+
+      const storeMaker: StoreCreator = index.rememberEnhancer(
+        mockDriver, ['counter']
+      )((() => mockStore) as StoreCreator);
+
+      const store: any = storeMaker(rootReducer, initialState, enhancer);
+
+      await store.unsafeRehydrate(['lazy']);
+
+      // the payload must carry the post-read state, otherwise anything
+      // dispatched during the read is rolled back
+      expect(mockStore.dispatch).toHaveBeenCalledWith({
+        type: actionTypes.REMEMBER_REHYDRATED,
+        payload: { counter: 2, lazy: 'loaded' }
+      });
+    });
+
+    it('store.unsafeRehydrate() does nothing when the read fails', async () => {
+      mockRehydrate.loadKeys = vi.fn(async () => undefined);
+
+      const storeMaker: StoreCreator = index.rememberEnhancer(
+        mockDriver, ['aa']
+      )((() => mockStore) as StoreCreator);
+
+      const store: any = storeMaker(rootReducer, initialState, enhancer);
+
+      await store.unsafeRehydrate(['bb']);
+
+      expect(mockStore.dispatch).not.toHaveBeenCalled();
+
+      // 'bb' must not start being persisted - the next persist would write the
+      // slice's initial state over whatever is already in storage
+      const [, storeKeys] = mockInit.mock.calls[0];
+      expect(storeKeys).toEqual(['aa']);
+    });
+
+    it('store.unsafeRehydrate() waits for the initial rehydration', async () => {
+      let finishInit = () => {};
+      mockInit.mockImplementationOnce(() => new Promise<void>((resolve) => {
+        finishInit = resolve;
+      }));
+
+      const storeMaker: StoreCreator = index.rememberEnhancer(
+        mockDriver, ['aa']
+      )((() => mockStore) as StoreCreator);
+
+      const store: any = storeMaker(rootReducer, initialState, enhancer);
+
+      const pending = store.unsafeRehydrate(['bb']);
+      await Promise.resolve();
+
+      // init() is still loading - reading now would let its dispatch roll us back
+      expect(mockRehydrate.loadKeys).not.toHaveBeenCalled();
+
+      finishInit();
+      await pending;
+
+      expect(mockRehydrate.loadKeys).toHaveBeenCalledWith(
+        ['bb'],
         expect.objectContaining({ driver: mockDriver })
       );
     });

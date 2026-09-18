@@ -25,8 +25,8 @@ export type ExtendedOptions = Options & {
   driver: Driver
 };
 
-export type RehydrateFunction = (keys?: string[]) => Promise<void>;
+export type UnsafeRehydrateFunction = (keys?: string[]) => Promise<void>;
 
 export type RememberEnhancerStoreExt = {
-  rehydrate: RehydrateFunction
+  unsafeRehydrate: UnsafeRehydrateFunction
 };

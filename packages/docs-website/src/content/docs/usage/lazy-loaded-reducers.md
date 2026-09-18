@@ -32,7 +32,7 @@ Redux Remember only ever touches the keys listed in `rememberedKeys`, so an inje
 
 For a slice you *do* want persisted, timing matters. Redux Remember reads storage and dispatches [`REMEMBER_REHYDRATED`](../api/actions.md#remember_rehydrated) once, when it initializes. A reducer injected after that point has already missed its rehydration, so its stored value would be dropped and it would start from its initial state.
 
-Call [`store.rehydrate(keys)`](../api/remember-enhancer.md) after injecting the reducer. It reads those keys from storage, rehydrates them into the store, and adds them to the remembered set so they're persisted from then on:
+Call [`store.unsafeRehydrate(keys)`](../api/remember-enhancer.md#storeunsaferehydrate) after injecting the reducer. It reads those keys from storage, rehydrates them into the store, and adds them to the remembered set so they're persisted from then on:
 
 ```ts
 const rootReducer = combineSlices(baseSlice);
@@ -45,14 +45,33 @@ const store = configureStore({
 });
 
 // when the lazy slice loads:
-rootReducer.inject(lazyPersistedSlice);   // 1. add the reducer to the tree
-await store.rehydrate(['lazyPersisted']); // 2. load its persisted state
+rootReducer.inject(lazyPersistedSlice);         // 1. add the reducer to the tree
+await store.unsafeRehydrate(['lazyPersisted']); // 2. load its persisted state
 ```
 
-After this, `lazyPersisted` holds its stored value and is persisted on every change like any statically-defined key. Called with no arguments, `store.rehydrate()` re-reads every currently remembered key.
+After this, `lazyPersisted` holds its stored value and is persisted on every change like any statically-defined key. Called with no arguments, `store.unsafeRehydrate()` re-reads every currently remembered key.
+
+## Why "unsafe"?
+
+The method is named `unsafeRehydrate` because it does two things the rest of Redux Remember does not:
+
+- It dispatches [`REMEMBER_REHYDRATED`](../api/actions.md#remember_rehydrated) again, which is otherwise documented as happening exactly once per store. Reducers that flip a one-way flag (such as a [Rehydration Gate](./rehydration-gate.md)) will see it a second time.
+- It overlays whatever is in storage on top of live state. That is exactly what you want immediately after injecting a reducer, and it is not what you want in response to arbitrary events.
+
+Within those bounds it is safe by construction:
+
+- Actions dispatched while storage is being read are **not** rolled back — the state is re-read after the load, immediately before dispatching.
+- Concurrent calls do not revert each other, so you can inject several lazy slices at once.
+- A key only starts being persisted **after** its stored value has been loaded, so a slow driver or a failed read can never cause the slice's initial state to overwrite good stored data.
+- [`migrate`](../api/remember-enhancer.md#migrate) is not re-run. It is a whole-state, run-once function; if a lazy slice's stored data needs migrating, do it in that slice's `unserialize`.
+
+Two things to keep in mind:
+
+- Await the returned promise before rendering the lazy route, otherwise it renders with initial state and then jumps to the stored value.
+- If you use [`initActionType`](../api/remember-enhancer.md#initactiontype), call `unsafeRehydrate` only after that action has been dispatched — before then Redux Remember is disabled, and the initial rehydration would later overwrite what you loaded.
 
 ## See Also
 
-- [`rememberEnhancer`](../api/remember-enhancer.md) — the `rememberedKeys` option and the `store.rehydrate` method
+- [`rememberEnhancer`](../api/remember-enhancer.md) — the `rememberedKeys` option and the [`store.unsafeRehydrate`](../api/remember-enhancer.md#storeunsaferehydrate) method
 - [`REMEMBER_REHYDRATED`](../api/actions.md#remember_rehydrated)
 - [Using in Reducers](./using-in-reducers.md)

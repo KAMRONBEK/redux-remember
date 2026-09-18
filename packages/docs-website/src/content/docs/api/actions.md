@@ -9,7 +9,7 @@ Redux Remember dispatches these actions that you can listen to in your reducers.
 - **Type:** `'@@REMEMBER_REHYDRATED'`
 - **Description:** Dispatched when state has been loaded from storage
 - **Payload:** The complete rehydrated root state
-- **Timing:** Dispatched once when the application loads
+- **Timing:** Dispatched once when the application loads — and again on every [`store.unsafeRehydrate()`](./remember-enhancer.md#storeunsaferehydrate) call, if you use it
 
 ## REMEMBER_PERSISTED
 

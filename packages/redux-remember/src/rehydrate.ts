@@ -56,6 +56,41 @@ export const loadAllKeyed = async ({
   }, {});
 };
 
+type LoadKeysOptions = Pick<
+  ExtendedOptions,
+  'driver' | 'prefix' | 'unserialize' | 'persistWholeStore' | 'errorHandler'
+>;
+
+// Reads the given keys from storage without touching the store. Returns
+// undefined when the read itself failed, so callers can tell that apart from a
+// successful read that simply found nothing stored (an empty object).
+export const loadKeys = async (
+  keys: string[],
+  {
+    driver,
+    prefix,
+    unserialize,
+    persistWholeStore,
+    errorHandler
+  }: LoadKeysOptions
+): Promise<Record<string, any> | undefined> => {
+  try {
+    const load = persistWholeStore
+      ? loadAll
+      : loadAllKeyed;
+
+    return await load({
+      rememberedKeys: keys,
+      driver,
+      prefix,
+      unserialize
+    });
+  } catch (err) {
+    errorHandler(new RehydrateError(err));
+    return undefined;
+  }
+};
+
 export const rehydrate = async (
   store: Store,
   rememberedKeys: string[],

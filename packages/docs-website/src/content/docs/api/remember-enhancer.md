@@ -193,6 +193,28 @@ rememberEnhancer(window.localStorage, rememberedKeys, {
 - Type: `StoreEnhancer`
 - Description: A Redux enhancer to be used with your store
 
+## Store Methods
+
+### store.unsafeRehydrate
+
+- **Type:** `(keys?: string[]) => Promise<void>`
+- **Description:** Reads the given keys from storage, rehydrates them into the store, and adds them to the remembered set so they are persisted from then on. Called with no arguments, it re-reads every currently remembered key.
+- **Use Case:** Rehydrating a [lazy-loaded (injected) reducer](../usage/lazy-loaded-reducers.md) whose key was not known when the store was created
+- **Why "unsafe":** It dispatches [`REMEMBER_REHYDRATED`](./actions.md#remember_rehydrated) again, which the rest of the documentation describes as happening exactly once, and it overlays whatever is in storage on top of live state. Both are fine when you call it deliberately, right after injecting a reducer; neither is safe on a timer or in response to arbitrary events.
+- **Notes:**
+  - [`migrate`](#migrate) is **not** applied. It is a whole-state, run-once function, and re-running it over already-migrated state would corrupt it. If the lazy slice's stored data needs migrating, migrate it inside its own `unserialize`.
+  - If the read fails, the error goes to [`errorHandler`](#errorhandler), no action is dispatched, and the keys are **not** added to the remembered set — so a transient storage failure cannot cause the slice's initial state to be written over good stored data.
+  - The returned promise resolves once the state has been rehydrated, so you can `await` it before rendering the lazy route.
+  - With [`initActionType`](#initactiontype) set, call it only after that action has been dispatched. Before then Redux Remember is disabled, and the initial rehydration would later overwrite what you loaded.
+
+**Example:**
+```ts
+rootReducer.inject(lazyPersistedSlice);
+await store.unsafeRehydrate(['lazyPersisted']);
+```
+
+See [Lazy-loaded Reducers](../usage/lazy-loaded-reducers.md) for the full walkthrough.
+
 ## See Also
 
 - [rememberReducer](./remember-reducer.md) - Wrap your reducers

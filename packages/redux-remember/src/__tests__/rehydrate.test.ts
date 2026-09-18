@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
 import type * as rehydrateModule from '../rehydrate.ts';
 import { REMEMBER_REHYDRATED } from '../action-types.ts';
 import type { Driver } from '../types.ts';
@@ -178,6 +178,82 @@ describe('rehydrate.ts', () => {
         great: 'val8'
       });
     });
+  });
+
+  describe('loadKeys()', () => {
+    let mockPrefix: string;
+    let mockDriver: Driver;
+    let mockErrorHandler: Mock;
+
+    const exec = (keys: string[], opts = {}) => mod.loadKeys(
+      keys,
+      {
+        prefix: mockPrefix,
+        driver: mockDriver,
+        unserialize: (data) => JSON.parse(data),
+        persistWholeStore: false,
+        errorHandler: mockErrorHandler,
+        ...opts
+      }
+    );
+
+    beforeEach(() => {
+      mockDriver = {
+        getItem: vi.fn((key) => JSON.stringify(`data-${key}`)),
+        setItem() {}
+      };
+
+      mockErrorHandler = vi.fn();
+      mockPrefix = 'pref2.';
+    });
+
+    it('reads the given keys one by one', async () => {
+      const res = await exec(['aa', 'bb']);
+
+      expect(mockDriver.getItem).toHaveBeenCalledWith('pref2.aa');
+      expect(mockDriver.getItem).toHaveBeenCalledWith('pref2.bb');
+
+      expect(res).toEqual({
+        aa: 'data-pref2.aa',
+        bb: 'data-pref2.bb'
+      });
+    });
+
+    it('reads the given keys out of the whole store', async () => {
+      mockDriver.getItem = vi.fn(() => JSON.stringify({
+        aa: 'val-aa',
+        bb: 'val-bb',
+        cc: 'val-cc'
+      }));
+
+      const res = await exec(['aa', 'cc'], { persistWholeStore: true });
+
+      expect(mockDriver.getItem).toHaveBeenCalledWith('pref2.rootState');
+
+      expect(res).toEqual({
+        aa: 'val-aa',
+        cc: 'val-cc'
+      });
+    });
+
+    it('returns an empty object when nothing is stored', async () => {
+      mockDriver.getItem = vi.fn(() => null);
+
+      expect(await exec(['aa'])).toEqual({});
+    });
+
+    it('returns undefined and reports the error when the read fails', async () => {
+      mockDriver.getItem = vi.fn(() => {
+        throw new Error('nope');
+      });
+
+      expect(await exec(['aa'])).toBeUndefined();
+
+      expect(mockErrorHandler).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'RehydrateError' })
+      );
+    });
+
   });
 
   describe('rehydrate()', () => {
